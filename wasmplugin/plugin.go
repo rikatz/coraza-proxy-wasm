@@ -1025,10 +1025,13 @@ func (ctx *corazaPlugin) onRuleSetCacheServerResponse(numHeaders, bodySize, numT
 		return
 	}
 
+	// This structure must reflect the same structure from https://github.com/networking-incubator/coraza-kubernetes-operator/blob/main/internal/rulesets/cache/cache.go#L31
 	var rulesResp struct {
 		UUID      string `json:"uuid"`
 		Timestamp string `json:"timestamp"`
 		Rules     string `json:"rules"`
+		// DataFiles contains a map with the datafiles names and their value
+		DataFiles map[string][]byte `json:"dataFiles,omitempty"`
 	}
 
 	if err := json.Unmarshal(body, &rulesResp); err != nil {
@@ -1046,7 +1049,7 @@ func (ctx *corazaPlugin) onRuleSetCacheServerResponse(numHeaders, bodySize, numT
 	conf := coraza.NewWAFConfig().
 		WithErrorCallback(logError).
 		WithDebugLogger(debuglog.DefaultWithPrinterFactory(logPrinterFactory)).
-		WithRootFS(root)
+		WithRootFS(NewRuleDataFS(rulesResp.DataFiles))
 
 	waf, err := coraza.NewWAF(conf.WithDirectives(rulesResp.Rules))
 	if err != nil {
@@ -1058,4 +1061,11 @@ func (ctx *corazaPlugin) onRuleSetCacheServerResponse(numHeaders, bodySize, numT
 	ctx.currentRuleSetUUID = rulesResp.UUID
 
 	proxywasm.LogCriticalf("Successfully loaded and activated WAF configuration (UUID: %s, %d bytes) from the ruleset cache server", rulesResp.UUID, len(rulesResp.Rules))
+	if len(rulesResp.DataFiles) > 0 {
+		size := 0
+		for _, value := range rulesResp.DataFiles {
+			size += len(value)
+		}
+		proxywasm.LogCriticalf("Loaded additional datafiles for rule UUID: %s (Files: %d, %d bytes)", rulesResp.UUID, len(rulesResp.DataFiles), size)
+	}
 }
