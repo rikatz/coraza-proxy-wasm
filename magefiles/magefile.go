@@ -19,8 +19,7 @@ import (
 	"github.com/tetratelabs/wabin/wasm"
 )
 
-var minGoVersion = "1.23"
-var minTinygoVersion = "0.34.0"
+var minGoVersion = "1.25"
 var addLicenseVersion = "04bfe4ee9ca5764577b029acc6a1957fd1997153" // https://github.com/google/addlicense
 var golangCILintVer = "v1.64.8"                                    // https://github.com/golangci/golangci-lint/releases
 var gosImportsVer = "v0.3.8"                                       // https://github.com/rinchsan/gosimports/releases/tag/v0.3.1
@@ -32,7 +31,6 @@ func init() {
 		lang       string
 		minVersion string
 	}{
-		{"tinygo", minTinygoVersion},
 		{"go", minGoVersion},
 	} {
 		if err := checkVersion(check.lang, check.minVersion); err != nil {
@@ -60,20 +58,6 @@ func checkVersion(lang string, minVersion string) error {
 		compare = goVersionRegex.FindStringSubmatch(v)
 		if len(compare) != 4 {
 			return fmt.Errorf("unexpected go semver: %q", v)
-		}
-	case "tinygo":
-		tinygoVersionRegex := regexp.MustCompile("tinygo version ([0-9]+).([0-9]+).?([0-9]+)?")
-		v, err := sh.Output("tinygo", "version")
-		if err != nil {
-			return fmt.Errorf("unexpected tinygo error: %v", err)
-		}
-		// Assume a dev build is valid.
-		if strings.Contains(v, "-dev") {
-			return nil
-		}
-		compare = tinygoVersionRegex.FindStringSubmatch(v)
-		if len(compare) != 4 {
-			return fmt.Errorf("unexpected tinygo semver: %q", v)
 		}
 	default:
 		return fmt.Errorf("unexpected language: %s", lang)
@@ -188,8 +172,6 @@ func Build() error {
 	}
 
 	buildTags := []string{
-		"custommalloc",     // https://github.com/wasilibs/nottinygc#usage
-		"nottinygc_envoy",  // https://github.com/wasilibs/nottinygc#using-with-envoy
 		"no_fs_access",     // https://github.com/corazawaf/coraza#build-tags
 		"memoize_builders", // https://github.com/corazawaf/coraza#build-tags
 	}
@@ -218,11 +200,8 @@ func Build() error {
 
 	buildArgs := []string{
 		"build",
-		"-gc=custom",
-		"-opt=2",
+		"-buildmode=c-shared",
 		"-o", filepath.Join("build", "mainraw.wasm"),
-		"-scheduler=none",
-		"-target=wasip1",
 		buildTagArg,
 	}
 
@@ -230,7 +209,12 @@ func Build() error {
 		buildArgs = append(buildArgs, "-interp-timeout="+interpTimeout)
 	}
 
-	if err := sh.RunV("tinygo", buildArgs...); err != nil {
+	envVars := map[string]string{
+		"GOOS":   "wasip1",
+		"GOARCH": "wasm",
+	}
+
+	if err := sh.RunWithV(envVars, "go", buildArgs...); err != nil {
 		return err
 	}
 
@@ -289,13 +273,47 @@ func patchWasm(inPath, outPath string, initialPages int) error {
 
 	mod.MemorySection.Min = uint32(initialPages)
 
+	// WASI functions that Go 1.24 stdlib imports but Coraza doesn't actually use at runtime
+	// These are stubbed out by mapping them to no-op proxy-wasm functions
+	unusedWasiFuncs := map[string]bool{
+		"fd_filestat_set_size":    true,
+		"fd_pread":                true,
+		"fd_pwrite":               true,
+		"fd_read":                 true,
+		"fd_readdir":              true,
+		"fd_seek":                 true,
+		"fd_sync":                 true,
+		"path_create_directory":   true,
+		"path_filestat_set_times": true,
+		"path_link":               true,
+		"path_open":               true,
+		"path_readlink":           true,
+		"path_remove_directory":   true,
+		"path_rename":             true,
+		"path_symlink":            true,
+		"path_unlink_file":        true,
+		"sock_accept":             true,
+		"sock_shutdown":           true,
+	}
+
 	for _, imp := range mod.ImportSection {
-		switch {
-		case imp.Name == "fd_filestat_get":
-			imp.Name = "fd_fdstat_get"
-		case imp.Name == "path_filestat_get":
-			imp.Module = "env"
-			imp.Name = "proxy_get_header_map_value"
+		if imp.Module == "wasi_snapshot_preview1" {
+			// Handle specific WASI function mappings (from original TinyGo patch)
+			switch imp.Name {
+			case "fd_filestat_get":
+				// Rename to the correct WASI function name
+				imp.Name = "fd_fdstat_get"
+			case "path_filestat_get":
+				// Map to a proxy-wasm function
+				imp.Module = "env"
+				imp.Name = "proxy_get_header_map_value"
+			default:
+				// Stub out other unused WASI functions
+				if unusedWasiFuncs[imp.Name] {
+					imp.Module = "env"
+					imp.Name = "proxy_log"
+				}
+			}
 		}
 	}
 

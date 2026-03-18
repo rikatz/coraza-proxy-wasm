@@ -14,7 +14,7 @@ services:
     depends_on:
       - chown
       - albedo
-    image: ${ENVOY_IMAGE:-envoyproxy/envoy:v1.31-latest}
+    image: ${ENVOY_IMAGE:-envoyproxy/envoy:v1.37-latest}
     command:
       - -c
       - ${ENVOY_CONFIG:-/conf/envoy-config.yaml}
