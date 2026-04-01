@@ -35,6 +35,9 @@ type pluginConfiguration struct {
 	// ruleSetCacheServerInstance is the unique identifier used to fetch rules for this specific WAF instance
 	ruleSetCacheServerInstance string
 
+	// ruleSetCacheServerToken is the bearer token that should be sent when authenticating to the cache server
+	ruleSetCacheServerToken string
+
 	// ruleSetReloadIntervalSeconds specifies how often to reload rules from the cache server
 	ruleSetReloadIntervalSeconds int
 
@@ -114,6 +117,12 @@ func parsePluginConfiguration(data []byte, infoLogger func(string)) (pluginConfi
 		config.ruleSetCacheServerInstance = ruleSetCacheServerInstance.String()
 	} else {
 		config.ruleSetCacheServerInstance = "default"
+	}
+
+	// check for the authentication token that should be used with the ruleset cache server
+	ruleSetCacheServerToken := jsonData.Get("cache_token")
+	if ruleSetCacheServerToken.Exists() {
+		config.ruleSetCacheServerToken = ruleSetCacheServerToken.String()
 	}
 
 	// check for a configured reload interval, otherwise default to 30 seconds

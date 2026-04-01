@@ -91,6 +91,9 @@ type corazaPlugin struct {
 	// ruleSetCacheServerInstance is the unique identifier used to fetch rules for this specific WAF instance
 	ruleSetCacheServerInstance string
 
+	// ruleSetCacheServerToken is the bearer token that should be sent when authenticating to the cache server
+	ruleSetCacheServerToken string
+
 	// ruleSetReloadEnabled indicates whether periodic rule reloading is enabled
 	ruleSetReloadEnabled bool
 
@@ -117,6 +120,7 @@ func (ctx *corazaPlugin) OnPluginStart(pluginConfigurationSize int) types.OnPlug
 	// Optionally enable periodic reloading of rules from the cache server.
 	ctx.ruleSetCacheServerCluster = config.ruleSetCacheServerCluster
 	ctx.ruleSetCacheServerInstance = config.ruleSetCacheServerInstance
+	ctx.ruleSetCacheServerToken = config.ruleSetCacheServerToken
 	ctx.failurePolicy = config.failurePolicy
 	if ctx.ruleSetCacheServerCluster != "" {
 		proxywasm.LogCriticalf("Fetching initial rules from ruleset cache server: %s, instance: %s", ctx.ruleSetCacheServerCluster, ctx.ruleSetCacheServerInstance)
@@ -901,13 +905,20 @@ func (ctx *corazaPlugin) checkLatestRuleSet() {
 		authority = authority[idx+2:]
 	}
 
+	headers := [][2]string{
+		{":method", "GET"},
+		{":path", path},
+		{":authority", authority},
+	}
+
+	if ctx.ruleSetCacheServerToken != "" {
+		authHeader := [2]string{"authorization", fmt.Sprintf("Bearer %s", ctx.ruleSetCacheServerToken)}
+		headers = append(headers, authHeader)
+	}
+
 	_, err := proxywasm.DispatchHttpCall(
 		ctx.ruleSetCacheServerCluster,
-		[][2]string{
-			{":method", "GET"},
-			{":path", path},
-			{":authority", authority},
-		},
+		headers,
 		nil,
 		[][2]string{},
 		cacheTimeoutMs,
@@ -930,13 +941,20 @@ func (ctx *corazaPlugin) fetchRulesFromCache() {
 		authority = authority[idx+2:]
 	}
 
+	headers := [][2]string{
+		{":method", "GET"},
+		{":path", path},
+		{":authority", authority},
+	}
+
+	if ctx.ruleSetCacheServerToken != "" {
+		authHeader := [2]string{"authorization", fmt.Sprintf("Bearer %s", ctx.ruleSetCacheServerToken)}
+		headers = append(headers, authHeader)
+	}
+
 	_, err := proxywasm.DispatchHttpCall(
 		ctx.ruleSetCacheServerCluster,
-		[][2]string{
-			{":method", "GET"},
-			{":path", path},
-			{":authority", authority},
-		},
+		headers,
 		nil,
 		[][2]string{},
 		cacheTimeoutMs,

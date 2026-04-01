@@ -296,6 +296,28 @@ func TestParsePluginConfiguration(t *testing.T) {
 				failurePolicy:          FailurePolicyFail,
 			},
 		},
+		{
+			name: "when cache_token is provided it should be used",
+			config: `
+			{
+				"directives_map": {
+					"default": ["SecRuleEngine On"]
+				},
+				"default_directives": "default",
+				"cache_token": "bla123"
+			}
+			`,
+			expectConfig: pluginConfiguration{
+				directivesMap: DirectivesMap{
+					"default": []string{"SecRuleEngine On"},
+				},
+				metricLabels:            map[string]string{},
+				defaultDirectives:       "default",
+				perAuthorityDirectives:  map[string]string{},
+				failurePolicy:           FailurePolicyFail,
+				ruleSetCacheServerToken: "bla123",
+			},
+		},
 	}
 
 	for _, testCase := range testCases {
@@ -309,6 +331,7 @@ func TestParsePluginConfiguration(t *testing.T) {
 				assert.Equal(t, testCase.expectConfig.defaultDirectives, cfg.defaultDirectives)
 				assert.Equal(t, testCase.expectConfig.perAuthorityDirectives, cfg.perAuthorityDirectives)
 				assert.Equal(t, testCase.expectConfig.failurePolicy, cfg.failurePolicy)
+				assert.Equal(t, testCase.expectConfig.ruleSetCacheServerToken, cfg.ruleSetCacheServerToken)
 			}
 		})
 	}
