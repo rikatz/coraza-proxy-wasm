@@ -102,6 +102,156 @@ func TestFailurePolicyAllow_AllowsOnError(t *testing.T) {
 	host.CompleteHttpContext(contextID)
 }
 
+func findHeader(headers [][2]string, key string) (string, bool) {
+	for _, h := range headers {
+		if h[0] == key {
+			return h[1], true
+		}
+	}
+	return "", false
+}
+
+func findCalloutByPath(callouts []proxytest.HttpCalloutAttribute, path string) (proxytest.HttpCalloutAttribute, bool) {
+	for _, c := range callouts {
+		if v, ok := findHeader(c.Headers, ":path"); ok && v == path {
+			return c, true
+		}
+	}
+	return proxytest.HttpCalloutAttribute{}, false
+}
+
+func TestFetchRulesFromCache_AuthorizationHeader(t *testing.T) {
+	testCases := []struct {
+		name            string
+		cacheToken      string
+		expectAuthZ     bool
+		expectedAuthVal string
+	}{
+		{
+			name:            "authorization header included when cache_token is set",
+			cacheToken:      "my-secret-token",
+			expectAuthZ:     true,
+			expectedAuthVal: "Bearer my-secret-token",
+		},
+		{
+			name:        "authorization header omitted when cache_token is empty",
+			cacheToken:  "",
+			expectAuthZ: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := `{
+				"directives_map": {
+					"default": ["SecRuleEngine On"]
+				},
+				"default_directives": "default",
+				"cache_server_cluster": "outbound|80||cache.example.com",
+				"cache_server_instance": "my-instance"`
+			if tc.cacheToken != "" {
+				config += `,
+				"cache_token": "` + tc.cacheToken + `"`
+			}
+			config += `}`
+
+			opt := proxytest.
+				NewEmulatorOption().
+				WithVMContext(NewVMContext()).
+				WithPluginConfiguration([]byte(config))
+
+			host, reset := proxytest.NewHostEmulator(opt)
+			defer reset()
+
+			require.Equal(t, types.OnPluginStartStatusOK, host.StartPlugin())
+
+			// fetchRulesFromCache is called during OnPluginStart when cache_server_cluster is set.
+			callouts := host.GetCalloutAttributesFromContext(proxytest.PluginContextID)
+			fetchCallout, found := findCalloutByPath(callouts, "/rules/my-instance")
+			require.True(t, found, "expected a callout to /rules/my-instance from fetchRulesFromCache")
+
+			assert.Equal(t, "outbound|80||cache.example.com", fetchCallout.Upstream)
+
+			authVal, hasAuth := findHeader(fetchCallout.Headers, "authorization")
+			if tc.expectAuthZ {
+				require.True(t, hasAuth, "expected authorization header to be present")
+				assert.Equal(t, tc.expectedAuthVal, authVal)
+			} else {
+				assert.False(t, hasAuth, "expected authorization header to be absent")
+			}
+
+			authority, _ := findHeader(fetchCallout.Headers, ":authority")
+			assert.Equal(t, "cache.example.com", authority)
+		})
+	}
+}
+
+func TestCheckLatestRuleSet_AuthorizationHeader(t *testing.T) {
+	testCases := []struct {
+		name            string
+		cacheToken      string
+		expectAuthZ     bool
+		expectedAuthVal string
+	}{
+		{
+			name:            "authorization header included when cache_token is set",
+			cacheToken:      "reload-token",
+			expectAuthZ:     true,
+			expectedAuthVal: "Bearer reload-token",
+		},
+		{
+			name:        "authorization header omitted when cache_token is empty",
+			cacheToken:  "",
+			expectAuthZ: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			config := `{
+				"directives_map": {
+					"default": ["SecRuleEngine On"]
+				},
+				"default_directives": "default",
+				"cache_server_cluster": "outbound|80||cache.example.com",
+				"cache_server_instance": "my-instance",
+				"rule_reload_interval_seconds": 10`
+			if tc.cacheToken != "" {
+				config += `,
+				"cache_token": "` + tc.cacheToken + `"`
+			}
+			config += `}`
+
+			opt := proxytest.
+				NewEmulatorOption().
+				WithVMContext(NewVMContext()).
+				WithPluginConfiguration([]byte(config))
+
+			host, reset := proxytest.NewHostEmulator(opt)
+			defer reset()
+
+			require.Equal(t, types.OnPluginStartStatusOK, host.StartPlugin())
+
+			// OnPluginStart dispatches fetchRulesFromCache; Tick dispatches checkLatestRuleSet.
+			host.Tick()
+
+			callouts := host.GetCalloutAttributesFromContext(proxytest.PluginContextID)
+			latestCallout, found := findCalloutByPath(callouts, "/rules/my-instance/latest")
+			require.True(t, found, "expected a callout to /rules/my-instance/latest from checkLatestRuleSet")
+
+			assert.Equal(t, "outbound|80||cache.example.com", latestCallout.Upstream)
+
+			authVal, hasAuth := findHeader(latestCallout.Headers, "authorization")
+			if tc.expectAuthZ {
+				require.True(t, hasAuth, "expected authorization header to be present")
+				assert.Equal(t, tc.expectedAuthVal, authVal)
+			} else {
+				assert.False(t, hasAuth, "expected authorization header to be absent")
+			}
+		})
+	}
+}
+
 func TestRetrieveAddressInfo(t *testing.T) {
 	testCases := map[string]struct {
 		address          []byte
