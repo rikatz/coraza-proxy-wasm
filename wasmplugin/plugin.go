@@ -82,8 +82,7 @@ type corazaPlugin struct {
 	// so that we don't need to reimplement all the methods.
 	types.DefaultPluginContext
 	perAuthorityWAFs wafMap
-	metricLabelsKV   []string
-	metrics          *wafMetrics
+	metrics          *contractMetrics
 
 	// ruleSetCacheServerCluster is the Envoy cluster address of the RuleSet Cache Server
 	ruleSetCacheServerCluster string
@@ -122,16 +121,16 @@ func (ctx *corazaPlugin) OnPluginStart(pluginConfigurationSize int) types.OnPlug
 	ctx.ruleSetCacheServerInstance = config.ruleSetCacheServerInstance
 	ctx.ruleSetCacheServerToken = config.ruleSetCacheServerToken
 	ctx.failurePolicy = config.failurePolicy
+	ctx.metrics = newContractMetrics(contractMetricsConfig{
+		Engine:    config.engine,
+		Namespace: config.namespace,
+	}, proxywasm.LogWarnf)
 	if ctx.ruleSetCacheServerCluster != "" {
 		proxywasm.LogCriticalf("Fetching initial rules from ruleset cache server: %s, instance: %s", ctx.ruleSetCacheServerCluster, ctx.ruleSetCacheServerInstance)
 
 		ctx.fetchRulesFromCache()
 
 		ctx.perAuthorityWAFs = newWAFMap(0)
-		for k, v := range config.metricLabels {
-			ctx.metricLabelsKV = append(ctx.metricLabelsKV, k, v)
-		}
-		ctx.metrics = NewWAFMetrics()
 
 		if config.ruleSetReloadIntervalSeconds > 0 {
 			ctx.ruleSetReloadEnabled = true
@@ -191,6 +190,7 @@ func (ctx *corazaPlugin) OnPluginStart(pluginConfigurationSize int) types.OnPlug
 		waf, err := coraza.NewWAF(conf.WithDirectives(strings.Join(directives, "\n")))
 		if err != nil {
 			proxywasm.LogCriticalf("Failed to parse directives: %v", err)
+			ctx.metrics.RecordPluginLoad(false)
 			return types.OnPluginStartStatusFailed
 		}
 
@@ -219,14 +219,12 @@ func (ctx *corazaPlugin) OnPluginStart(pluginConfigurationSize int) types.OnPlug
 			proxywasm.LogCriticalf("Unknown directives %q", unknownDirective)
 		}
 
+		ctx.metrics.RecordPluginLoad(false)
 		return types.OnPluginStartStatusFailed
 	}
 
 	ctx.perAuthorityWAFs = perAuthorityWAFs
-	for k, v := range config.metricLabels {
-		ctx.metricLabelsKV = append(ctx.metricLabelsKV, k, v)
-	}
-	ctx.metrics = NewWAFMetrics()
+	ctx.metrics.RecordPluginLoad(true)
 
 	return types.OnPluginStartStatusOK
 }
@@ -235,7 +233,6 @@ func (ctx *corazaPlugin) NewHttpContext(contextID uint32) types.HttpContext {
 	return &httpContext{
 		contextID:        contextID,
 		metrics:          ctx.metrics,
-		metricLabelsKV:   ctx.metricLabelsKV,
 		perAuthorityWAFs: ctx.perAuthorityWAFs,
 		failurePolicy:    ctx.failurePolicy,
 	}
@@ -281,17 +278,15 @@ type httpContext struct {
 	processedRequestBody  bool
 	processedResponseBody bool
 	bodyReadIndex         int
-	metrics               *wafMetrics
+	metrics               *contractMetrics
 	interruptedAt         interruptionPhase
 	logger                debuglog.Logger
-	metricLabelsKV        []string
 	failurePolicy         FailurePolicy
+	evalError             bool
 }
 
 func (ctx *httpContext) OnHttpRequestHeaders(numHeaders int, endOfStream bool) types.Action {
 	defer logTime("OnHttpRequestHeaders", currentTime())
-
-	ctx.metrics.CountTX()
 
 	authority, err := proxywasm.GetHttpRequestHeader(":authority")
 	if err != nil {
@@ -314,10 +309,6 @@ func (ctx *httpContext) OnHttpRequestHeaders(numHeaders int, endOfStream bool) t
 		// CRS rules tend to expect Host even with HTTP/2
 		ctx.tx.AddRequestHeader("Host", authority)
 		ctx.tx.SetServerName(parseServerName(ctx.logger, authority))
-
-		if !isDefault {
-			ctx.metricLabelsKV = append(ctx.metricLabelsKV, "authority", authority)
-		}
 	} else {
 		return ctx.handleInternalEngineFailurePolicy(fmt.Sprintf("Failed to resolve WAF for authority %q: %v", authority, resolveWAFErr))
 	}
@@ -702,6 +693,8 @@ func (ctx *httpContext) OnHttpStreamDone() {
 		// Internally, if the engine is off, no log phase rules are evaluated
 		ctx.tx.ProcessLogging()
 
+		ctx.recordTransactionMetrics()
+
 		err := ctx.tx.Close()
 		if err != nil {
 			ctx.logger.Error().Err(err).Msg("Failed to close transaction")
@@ -714,13 +707,28 @@ func (ctx *httpContext) OnHttpStreamDone() {
 const noGRPCStream int32 = -1
 const defaultInterruptionStatusCode int = 403
 
+func (ctx *httpContext) recordTransactionMetrics() {
+	if ctx.metrics == nil || !ctx.metrics.enabledMetrics() || ctx.tx == nil {
+		return
+	}
+
+	tx := ctx.tx
+	interrupted := ctx.interruptedAt.isInterrupted()
+	var interruption *ctypes.Interruption
+	if interrupted {
+		interruption = tx.Interruption()
+	}
+
+	outcome := classifyRequestOutcome(tx, interrupted, interruption, ctx.evalError)
+	ctx.metrics.RecordRequestOutcome(outcome)
+	ctx.metrics.RecordMatchedRules(tx.MatchedRules(), outcome)
+}
+
 func (ctx *httpContext) handleInterruption(phase interruptionPhase, interruption *ctypes.Interruption) types.Action {
 	if ctx.interruptedAt.isInterrupted() {
 		// handleInterruption should never be called more than once
 		panic("Interruption already handled")
 	}
-
-	ctx.metrics.CountTXInterruption(phase.String(), interruption.RuleID, ctx.metricLabelsKV)
 
 	ctx.logger.Info().
 		Str("action", interruption.Action).
@@ -845,6 +853,7 @@ func replaceResponseBodyWhenInterrupted(logger debuglog.Logger, bodySize int) ty
 // - If the failure policy is "allow", traffic continues despite the error
 // - If the failure policy is "fail", the request is blocked
 func (ctx *httpContext) handleInternalEngineFailurePolicy(errorMsg string) types.Action {
+	ctx.evalError = true
 	if ctx.failurePolicy != FailurePolicyAllow {
 		// Log error - use logger if available, otherwise use proxywasm logging
 		if ctx.logger != nil {
@@ -1075,11 +1084,14 @@ func (ctx *corazaPlugin) onRuleSetCacheServerResponse(numHeaders, bodySize, numT
 	waf, err := coraza.NewWAF(conf.WithDirectives(rulesResp.Rules))
 	if err != nil {
 		proxywasm.LogCriticalf("Failed to create WAF from cached rules: %v", err)
+		ctx.metrics.RecordPluginLoad(false)
 		return
 	}
 
 	ctx.perAuthorityWAFs.setDefaultWAF(waf)
 	ctx.currentRuleSetUUID = rulesResp.UUID
+	ctx.metrics.resetOnReload()
+	ctx.metrics.RecordPluginLoad(true)
 
 	proxywasm.LogCriticalf("Successfully loaded and activated WAF configuration (UUID: %s, %d bytes) from the ruleset cache server", rulesResp.UUID, len(rulesResp.Rules))
 	if len(rulesResp.DataFiles) > 0 {
