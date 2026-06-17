@@ -33,6 +33,9 @@ type contractMetrics struct {
 	gauges     map[string]proxywasm.MetricGauge
 
 	ruleHitsTopN *topNTracker
+
+	lastOverrideGauges     map[string]struct{}
+	lastPluginRuleCountGauge string
 }
 
 type contractMetricsConfig struct {
@@ -54,11 +57,12 @@ func newContractMetrics(cfg contractMetricsConfig, logWarn warnLogger) *contract
 	}
 
 	m := &contractMetrics{
-		driverType: driverType,
-		counters:   make(map[string]proxywasm.MetricCounter),
-		histograms: make(map[string]proxywasm.MetricHistogram),
-		gauges:     make(map[string]proxywasm.MetricGauge),
-		ruleHitsTopN: newTopNTracker(topN),
+		driverType:           driverType,
+		counters:             make(map[string]proxywasm.MetricCounter),
+		histograms:           make(map[string]proxywasm.MetricHistogram),
+		gauges:               make(map[string]proxywasm.MetricGauge),
+		ruleHitsTopN:         newTopNTracker(topN),
+		lastOverrideGauges:   make(map[string]struct{}),
 	}
 
 	if strings.TrimSpace(cfg.Engine) == "" || strings.TrimSpace(cfg.Namespace) == "" {
@@ -83,6 +87,7 @@ func (m *contractMetrics) resetOnReload() {
 		return
 	}
 	m.ruleHitsTopN.reset()
+	m.clearPreviousOverrideGauges()
 }
 
 func (m *contractMetrics) baseLabels() [][2]string {

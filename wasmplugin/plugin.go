@@ -224,6 +224,7 @@ func (ctx *corazaPlugin) OnPluginStart(pluginConfigurationSize int) types.OnPlug
 	}
 
 	ctx.perAuthorityWAFs = perAuthorityWAFs
+	ctx.metrics.RecordLoadConfiguration(joinDirectives(config.directivesMap))
 	ctx.metrics.RecordPluginLoad(true)
 
 	return types.OnPluginStartStatusOK
@@ -720,8 +721,11 @@ func (ctx *httpContext) recordTransactionMetrics() {
 	}
 
 	outcome := classifyRequestOutcome(tx, interrupted, interruption, ctx.evalError)
+	matched := tx.MatchedRules()
 	ctx.metrics.RecordRequestOutcome(outcome)
-	ctx.metrics.RecordMatchedRules(tx.MatchedRules(), outcome)
+	ctx.metrics.RecordMatchedRules(matched, outcome)
+	ctx.metrics.RecordAnomalyScore(anomalyScoreFromMatchedRules(matched))
+	ctx.metrics.RecordBlockedCategories(matched, outcome)
 }
 
 func (ctx *httpContext) handleInterruption(phase interruptionPhase, interruption *ctypes.Interruption) types.Action {
@@ -1091,6 +1095,7 @@ func (ctx *corazaPlugin) onRuleSetCacheServerResponse(numHeaders, bodySize, numT
 	ctx.perAuthorityWAFs.setDefaultWAF(waf)
 	ctx.currentRuleSetUUID = rulesResp.UUID
 	ctx.metrics.resetOnReload()
+	ctx.metrics.RecordLoadConfiguration(rulesResp.Rules)
 	ctx.metrics.RecordPluginLoad(true)
 
 	proxywasm.LogCriticalf("Successfully loaded and activated WAF configuration (UUID: %s, %d bytes) from the ruleset cache server", rulesResp.UUID, len(rulesResp.Rules))
