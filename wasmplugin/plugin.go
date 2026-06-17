@@ -101,6 +101,9 @@ type corazaPlugin struct {
 
 	// failurePolicy determines how to handle errors when the WAF is not ready or encounters errors
 	failurePolicy FailurePolicy
+
+	engine    string
+	namespace string
 }
 
 func (ctx *corazaPlugin) OnPluginStart(pluginConfigurationSize int) types.OnPluginStartStatus {
@@ -121,6 +124,8 @@ func (ctx *corazaPlugin) OnPluginStart(pluginConfigurationSize int) types.OnPlug
 	ctx.ruleSetCacheServerInstance = config.ruleSetCacheServerInstance
 	ctx.ruleSetCacheServerToken = config.ruleSetCacheServerToken
 	ctx.failurePolicy = config.failurePolicy
+	ctx.engine = config.engine
+	ctx.namespace = config.namespace
 	ctx.metrics = newContractMetrics(contractMetricsConfig{
 		Engine:    config.engine,
 		Namespace: config.namespace,
@@ -236,6 +241,8 @@ func (ctx *corazaPlugin) NewHttpContext(contextID uint32) types.HttpContext {
 		metrics:          ctx.metrics,
 		perAuthorityWAFs: ctx.perAuthorityWAFs,
 		failurePolicy:    ctx.failurePolicy,
+		engine:           ctx.engine,
+		namespace:        ctx.namespace,
 	}
 }
 
@@ -284,6 +291,11 @@ type httpContext struct {
 	logger                debuglog.Logger
 	failurePolicy         FailurePolicy
 	evalError             bool
+	engine                string
+	namespace             string
+	requestMethod         string
+	requestURI            string
+	clientIP              string
 }
 
 func (ctx *httpContext) OnHttpRequestHeaders(numHeaders int, endOfStream bool) types.Action {
@@ -326,6 +338,7 @@ func (ctx *httpContext) OnHttpRequestHeaders(numHeaders int, endOfStream bool) t
 	// OnHttpRequestHeaders does not terminate if IP/Port retrieve goes wrong
 	srcIP, srcPort := retrieveAddressInfo(ctx.logger, "source")
 	dstIP, dstPort := retrieveAddressInfo(ctx.logger, "destination")
+	ctx.clientIP = srcIP
 
 	tx.ProcessConnection(srcIP, srcPort, dstIP, dstPort)
 
@@ -360,6 +373,9 @@ func (ctx *httpContext) OnHttpRequestHeaders(numHeaders int, endOfStream bool) t
 			uri = string(propPathRaw)
 		}
 	}
+
+	ctx.requestMethod = method
+	ctx.requestURI = uri
 
 	protocol, err := proxywasm.GetProperty([]string{"request", "protocol"})
 	if err != nil {
@@ -740,6 +756,7 @@ func (ctx *httpContext) handleInterruption(phase interruptionPhase, interruption
 		Msg("Transaction interrupted")
 
 	ctx.interruptedAt = phase
+	ctx.logBlockedRequest(phase, interruption)
 	if phase == interruptionPhaseHttpResponseBody {
 		return replaceResponseBodyWhenInterrupted(ctx.logger, ctx.bodyReadIndex)
 	}
