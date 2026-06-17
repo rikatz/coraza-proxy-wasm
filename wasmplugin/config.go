@@ -43,6 +43,10 @@ type pluginConfiguration struct {
 
 	// failurePolicy determines the behavior when the WAF is not ready or encounters errors.
 	failurePolicy FailurePolicy
+
+	// engine and namespace identify the Engine CRD for coraza_waf_* metric labels.
+	engine    string
+	namespace string
 }
 
 type DirectivesMap map[string][]string
@@ -141,6 +145,13 @@ func parsePluginConfiguration(data []byte, infoLogger func(string)) (pluginConfi
 	} else {
 		config.failurePolicy = FailurePolicyFail
 		infoLogger(fmt.Sprintf("FailurePolicy defaulting to `%s`", config.failurePolicy))
+	}
+
+	if engine := jsonData.Get("engine"); engine.Exists() {
+		config.engine = engine.String()
+	}
+	if namespace := jsonData.Get("namespace"); namespace.Exists() {
+		config.namespace = namespace.String()
 	}
 
 	if len(config.directivesMap) == 0 {
