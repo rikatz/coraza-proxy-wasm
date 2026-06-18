@@ -80,6 +80,7 @@ func (ctx *httpContext) logBlockedRequest(phase interruptionPhase, interruption 
 			entry.ClientIP = matched.ClientIPAddress()
 		}
 	}
+	setWAFAccessLogFilterState(interruption.RuleID, entry.Category)
 
 	payload, err := json.Marshal(entry)
 	if err != nil {
