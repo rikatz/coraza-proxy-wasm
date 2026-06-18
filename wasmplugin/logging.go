@@ -87,5 +87,7 @@ func (ctx *httpContext) logBlockedRequest(phase interruptionPhase, interruption 
 		proxywasm.LogWarnf("failed to marshal blocked request log: %v", err)
 		return
 	}
-	proxywasm.LogInfo(string(payload))
+	// LogWarn so structured block events appear when Envoy proxyLogLevel is warning
+	// (the default on Istio Gateway pods). LogInfo is filtered out in that case.
+	proxywasm.LogWarn(string(payload))
 }
