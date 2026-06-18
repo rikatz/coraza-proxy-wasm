@@ -48,7 +48,7 @@ func matchedRuleForInterruption(rules []ctypes.MatchedRule, ruleID int) ctypes.M
 }
 
 func (ctx *httpContext) logBlockedRequest(phase interruptionPhase, interruption *ctypes.Interruption) {
-	if ctx.tx == nil || interruption == nil {
+	if !ctx.metricsMode.usesContractMetrics() || ctx.tx == nil || interruption == nil {
 		return
 	}
 
@@ -72,7 +72,7 @@ func (ctx *httpContext) logBlockedRequest(phase interruptionPhase, interruption 
 
 	if matched := matchedRuleForInterruption(ctx.tx.MatchedRules(), interruption.RuleID); matched != nil {
 		entry.Severity = contractSeverity(matched.Rule().Severity())
-		entry.Category = categoryFromRuleTags(matched.Rule().Tags())
+		entry.Category = categoryFromAttackTags(matched.Rule().Tags())
 		if data := matched.Data(); data != "" {
 			entry.MatchedData = truncateMatchedData(data)
 		}

@@ -82,7 +82,10 @@ type corazaPlugin struct {
 	// so that we don't need to reimplement all the methods.
 	types.DefaultPluginContext
 	perAuthorityWAFs wafMap
-	metrics          *contractMetrics
+	metricLabelsKV   []string
+	legacyMetrics    *wafMetrics
+	contractMetrics  *contractMetrics
+	metricsMode      metricsMode
 
 	// ruleSetCacheServerCluster is the Envoy cluster address of the RuleSet Cache Server
 	ruleSetCacheServerCluster string
@@ -126,10 +129,8 @@ func (ctx *corazaPlugin) OnPluginStart(pluginConfigurationSize int) types.OnPlug
 	ctx.failurePolicy = config.failurePolicy
 	ctx.engine = config.engine
 	ctx.namespace = config.namespace
-	ctx.metrics = newContractMetrics(contractMetricsConfig{
-		Engine:    config.engine,
-		Namespace: config.namespace,
-	}, proxywasm.LogWarnf)
+	ctx.metricsMode = config.metricsMode
+	ctx.initMetricsFromConfig(config)
 	if ctx.ruleSetCacheServerCluster != "" {
 		proxywasm.LogCriticalf("Fetching initial rules from ruleset cache server: %s, instance: %s", ctx.ruleSetCacheServerCluster, ctx.ruleSetCacheServerInstance)
 
@@ -195,7 +196,9 @@ func (ctx *corazaPlugin) OnPluginStart(pluginConfigurationSize int) types.OnPlug
 		waf, err := coraza.NewWAF(conf.WithDirectives(strings.Join(directives, "\n")))
 		if err != nil {
 			proxywasm.LogCriticalf("Failed to parse directives: %v", err)
-			ctx.metrics.RecordPluginLoad(false)
+			if ctx.contractMetrics != nil {
+				ctx.contractMetrics.RecordPluginLoad(false)
+			}
 			return types.OnPluginStartStatusFailed
 		}
 
@@ -224,21 +227,41 @@ func (ctx *corazaPlugin) OnPluginStart(pluginConfigurationSize int) types.OnPlug
 			proxywasm.LogCriticalf("Unknown directives %q", unknownDirective)
 		}
 
-		ctx.metrics.RecordPluginLoad(false)
+		ctx.contractMetrics.RecordPluginLoad(false)
 		return types.OnPluginStartStatusFailed
 	}
 
 	ctx.perAuthorityWAFs = perAuthorityWAFs
-	ctx.metrics.RecordLoadConfiguration(joinDirectives(config.directivesMap))
-	ctx.metrics.RecordPluginLoad(true)
+	if ctx.contractMetrics != nil {
+		ctx.contractMetrics.RecordLoadConfiguration(joinDirectives(config.directivesMap))
+		ctx.contractMetrics.RecordPluginLoad(true)
+	}
 
 	return types.OnPluginStartStatusOK
+}
+
+func (ctx *corazaPlugin) initMetricsFromConfig(config pluginConfiguration) {
+	for k, v := range config.metricLabels {
+		ctx.metricLabelsKV = append(ctx.metricLabelsKV, k, v)
+	}
+	if config.metricsMode.usesLegacyMetrics() {
+		ctx.legacyMetrics = NewWAFMetrics()
+	}
+	if config.metricsMode.usesContractMetrics() {
+		ctx.contractMetrics = newContractMetrics(contractMetricsConfig{
+			Engine:    config.engine,
+			Namespace: config.namespace,
+		}, proxywasm.LogWarnf)
+	}
 }
 
 func (ctx *corazaPlugin) NewHttpContext(contextID uint32) types.HttpContext {
 	return &httpContext{
 		contextID:        contextID,
-		metrics:          ctx.metrics,
+		legacyMetrics:    ctx.legacyMetrics,
+		contractMetrics:  ctx.contractMetrics,
+		metricLabelsKV:   ctx.metricLabelsKV,
+		metricsMode:      ctx.metricsMode,
 		perAuthorityWAFs: ctx.perAuthorityWAFs,
 		failurePolicy:    ctx.failurePolicy,
 		engine:           ctx.engine,
@@ -286,7 +309,10 @@ type httpContext struct {
 	processedRequestBody  bool
 	processedResponseBody bool
 	bodyReadIndex         int
-	metrics               *contractMetrics
+	legacyMetrics         *wafMetrics
+	contractMetrics       *contractMetrics
+	metricLabelsKV        []string
+	metricsMode           metricsMode
 	interruptedAt         interruptionPhase
 	logger                debuglog.Logger
 	failurePolicy         FailurePolicy
@@ -300,6 +326,10 @@ type httpContext struct {
 
 func (ctx *httpContext) OnHttpRequestHeaders(numHeaders int, endOfStream bool) types.Action {
 	defer logTime("OnHttpRequestHeaders", currentTime())
+
+	if ctx.legacyMetrics != nil {
+		ctx.legacyMetrics.CountTX()
+	}
 
 	authority, err := proxywasm.GetHttpRequestHeader(":authority")
 	if err != nil {
@@ -322,6 +352,10 @@ func (ctx *httpContext) OnHttpRequestHeaders(numHeaders int, endOfStream bool) t
 		// CRS rules tend to expect Host even with HTTP/2
 		ctx.tx.AddRequestHeader("Host", authority)
 		ctx.tx.SetServerName(parseServerName(ctx.logger, authority))
+
+		if !isDefault {
+			ctx.metricLabelsKV = append(ctx.metricLabelsKV, "authority", authority)
+		}
 	} else {
 		return ctx.handleInternalEngineFailurePolicy(fmt.Sprintf("Failed to resolve WAF for authority %q: %v", authority, resolveWAFErr))
 	}
@@ -725,7 +759,7 @@ const noGRPCStream int32 = -1
 const defaultInterruptionStatusCode int = 403
 
 func (ctx *httpContext) recordTransactionMetrics() {
-	if ctx.metrics == nil || !ctx.metrics.enabledMetrics() || ctx.tx == nil {
+	if ctx.contractMetrics == nil || !ctx.contractMetrics.enabledMetrics() || ctx.tx == nil {
 		return
 	}
 
@@ -738,10 +772,10 @@ func (ctx *httpContext) recordTransactionMetrics() {
 
 	outcome := classifyRequestOutcome(tx, interrupted, interruption, ctx.evalError)
 	matched := tx.MatchedRules()
-	ctx.metrics.RecordRequestOutcome(outcome)
-	ctx.metrics.RecordMatchedRules(matched, outcome)
-	ctx.metrics.RecordAnomalyScore(anomalyScoreFromMatchedRules(matched))
-	ctx.metrics.RecordBlockedCategories(matched, outcome)
+	ctx.contractMetrics.RecordRequestOutcome(outcome)
+	ctx.contractMetrics.RecordMatchedRules(matched, outcome)
+	ctx.contractMetrics.RecordAnomalyScore(anomalyScoreFromMatchedRules(matched))
+	ctx.contractMetrics.RecordBlockedCategories(matched, outcome)
 }
 
 func (ctx *httpContext) handleInterruption(phase interruptionPhase, interruption *ctypes.Interruption) types.Action {
@@ -756,6 +790,9 @@ func (ctx *httpContext) handleInterruption(phase interruptionPhase, interruption
 		Msg("Transaction interrupted")
 
 	ctx.interruptedAt = phase
+	if ctx.legacyMetrics != nil {
+		ctx.legacyMetrics.CountTXInterruption(phase.String(), interruption.RuleID, ctx.metricLabelsKV)
+	}
 	ctx.logBlockedRequest(phase, interruption)
 	if phase == interruptionPhaseHttpResponseBody {
 		return replaceResponseBodyWhenInterrupted(ctx.logger, ctx.bodyReadIndex)
@@ -1105,15 +1142,19 @@ func (ctx *corazaPlugin) onRuleSetCacheServerResponse(numHeaders, bodySize, numT
 	waf, err := coraza.NewWAF(conf.WithDirectives(rulesResp.Rules))
 	if err != nil {
 		proxywasm.LogCriticalf("Failed to create WAF from cached rules: %v", err)
-		ctx.metrics.RecordPluginLoad(false)
+		if ctx.contractMetrics != nil {
+			ctx.contractMetrics.RecordPluginLoad(false)
+		}
 		return
 	}
 
 	ctx.perAuthorityWAFs.setDefaultWAF(waf)
 	ctx.currentRuleSetUUID = rulesResp.UUID
-	ctx.metrics.resetOnReload()
-	ctx.metrics.RecordLoadConfiguration(rulesResp.Rules)
-	ctx.metrics.RecordPluginLoad(true)
+	if ctx.contractMetrics != nil {
+		ctx.contractMetrics.resetOnReload()
+		ctx.contractMetrics.RecordLoadConfiguration(rulesResp.Rules)
+		ctx.contractMetrics.RecordPluginLoad(true)
+	}
 
 	proxywasm.LogCriticalf("Successfully loaded and activated WAF configuration (UUID: %s, %d bytes) from the ruleset cache server", rulesResp.UUID, len(rulesResp.Rules))
 	if len(rulesResp.DataFiles) > 0 {

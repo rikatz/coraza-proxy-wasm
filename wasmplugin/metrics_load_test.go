@@ -31,8 +31,19 @@ SecRuleRemoveById 102
 }
 
 func TestCategoryFromRuleTags(t *testing.T) {
-	assert.Equal(t, "sqli", categoryFromRuleTags([]string{"attack-sqli", "OWASP_CRS"}))
-	assert.Equal(t, "other", categoryFromRuleTags([]string{"OWASP_CRS"}))
+	assert.Equal(t, "sqli", categoryFromAttackTags([]string{"attack-sqli", "OWASP_CRS"}))
+	assert.Equal(t, "injection_php", categoryFromAttackTags([]string{"attack-injection-php", "OWASP_CRS"}))
+	assert.Equal(t, "protocol", categoryFromAttackTags([]string{"attack-protocol"}))
+	assert.Equal(t, "other", categoryFromAttackTags([]string{"OWASP_CRS"}))
+}
+
+func TestCategoryFromAttackTag(t *testing.T) {
+	category, ok := categoryFromAttackTag("attack-xss")
+	assert.True(t, ok)
+	assert.Equal(t, "xss", category)
+
+	_, ok = categoryFromAttackTag("not-an-attack-tag")
+	assert.False(t, ok)
 }
 
 func TestAnomalyScoreFromMatchedRules(t *testing.T) {

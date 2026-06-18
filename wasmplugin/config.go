@@ -47,6 +47,9 @@ type pluginConfiguration struct {
 	// engine and namespace identify the Engine CRD for coraza_waf_* metric labels.
 	engine    string
 	namespace string
+
+	// metricsMode selects legacy waf_filter_* metrics (default) or coraza_waf_* contract metrics.
+	metricsMode metricsMode
 }
 
 type DirectivesMap map[string][]string
@@ -153,6 +156,12 @@ func parsePluginConfiguration(data []byte, infoLogger func(string)) (pluginConfi
 	if namespace := jsonData.Get("namespace"); namespace.Exists() {
 		config.namespace = namespace.String()
 	}
+
+	mode, err := parseMetricsMode(jsonData.Get("metrics_mode"))
+	if err != nil {
+		return config, err
+	}
+	config.metricsMode = mode
 
 	if len(config.directivesMap) == 0 {
 		rules := jsonData.Get("rules")

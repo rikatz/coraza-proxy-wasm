@@ -8,27 +8,6 @@ import (
 	"github.com/tetratelabs/proxy-wasm-go-sdk/proxywasm"
 )
 
-var crsTagToCategory = map[string]string{
-	"attack-sqli":              "sqli",
-	"attack-xss":               "xss",
-	"attack-rce":               "rce",
-	"attack-lfi":               "lfi",
-	"attack-rfi":               "rfi",
-	"attack-command-injection": "command_injection",
-	"attack-protocol":          "protocol_attack",
-	"attack-session-fixation":  "session_fixation",
-	"attack-java":              "java_attack",
-}
-
-func categoryFromRuleTags(tags []string) string {
-	for _, tag := range tags {
-		if category, ok := crsTagToCategory[tag]; ok {
-			return category
-		}
-	}
-	return "other"
-}
-
 func (m *contractMetrics) RecordBlockedCategories(rules []ctypes.MatchedRule, requestOutcome string) {
 	if !m.enabledMetrics() {
 		return
@@ -39,7 +18,7 @@ func (m *contractMetrics) RecordBlockedCategories(rules []ctypes.MatchedRule, re
 
 	seen := make(map[string]struct{})
 	for _, rule := range rules {
-		category := categoryFromRuleTags(rule.Rule().Tags())
+		category := m.categoryFromRuleTags(rule.Rule().Tags())
 		severity := contractSeverity(rule.Rule().Severity())
 		key := category + "|" + severity
 		if _, ok := seen[key]; ok {

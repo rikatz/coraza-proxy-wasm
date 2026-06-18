@@ -3,9 +3,9 @@ stats_config:
     # Extract coraza_waf_* Prometheus labels from WASM-encoded stat names.
     # See https://www.envoyproxy.io/docs/envoy/latest/api-v3/config/metrics/v3/stats.proto#config-metrics-v3-statsconfig.
     - tag_name: engine
-      regex: "_engine=([a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)"
+      regex: "_engine=([a-zA-Z0-9](?:[-a-zA-Z0-9]*[a-zA-Z0-9])?)"
     - tag_name: namespace
-      regex: "_namespace=([a-zA-Z0-9]([-a-zA-Z0-9]*[a-zA-Z0-9])?)"
+      regex: "_namespace=([a-zA-Z0-9](?:[-a-zA-Z0-9]*[a-zA-Z0-9])?)"
     - tag_name: driver_type
       regex: "_driver_type=([a-z]+)"
     - tag_name: outcome
@@ -84,6 +84,7 @@ static_resources:
                                   ]
                               },
                               "default_directives": "rs1",
+                              "metrics_mode": "contract",
                               "engine": "example-engine",
                               "namespace": "example",
                               "per_authority_directives":{

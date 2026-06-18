@@ -22,7 +22,7 @@ import (
 	"github.com/corazawaf/coraza-proxy-wasm/wasmplugin"
 )
 
-const defaultPluginConfigForTests = `{"directives_map": {"default": []}, "default_directives": "default", "engine": "test-engine", "namespace": "test-ns"}`
+const defaultPluginConfigForTests = `{"directives_map": {"default": []}, "default_directives": "default", "metrics_mode": "contract", "engine": "test-engine", "namespace": "test-ns"}`
 
 func checkRequestOutcomeMetric(t *testing.T, host proxytest.HostEmulator, outcome string, expectedCounter uint64) {
 	t.Helper()
