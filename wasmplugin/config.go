@@ -50,6 +50,11 @@ type pluginConfiguration struct {
 
 	// metricsMode selects legacy waf_filter_* metrics (default) or coraza_waf_* contract metrics.
 	metricsMode metricsMode
+
+	// suppressCRSAuditLogs disables ModSecurity-style Coraza audit lines on the proxy log
+	// stream when structured JSON block logs are emitted (contract mode). FTW conformance
+	// reads raw pod logs and requires audit lines unless tests are updated for JSON.
+	suppressCRSAuditLogs bool
 }
 
 type DirectivesMap map[string][]string
@@ -162,6 +167,10 @@ func parsePluginConfiguration(data []byte, infoLogger func(string)) (pluginConfi
 		return config, err
 	}
 	config.metricsMode = mode
+
+	if suppress := jsonData.Get("suppress_crs_audit_logs"); suppress.Exists() {
+		config.suppressCRSAuditLogs = suppress.Bool()
+	}
 
 	if len(config.directivesMap) == 0 {
 		rules := jsonData.Get("rules")

@@ -86,6 +86,7 @@ type corazaPlugin struct {
 	legacyMetrics    *wafMetrics
 	contractMetrics  *contractMetrics
 	metricsMode      metricsMode
+	suppressCRSAuditLogs bool
 
 	// ruleSetCacheServerCluster is the Envoy cluster address of the RuleSet Cache Server
 	ruleSetCacheServerCluster string
@@ -130,6 +131,7 @@ func (ctx *corazaPlugin) OnPluginStart(pluginConfigurationSize int) types.OnPlug
 	ctx.engine = config.engine
 	ctx.namespace = config.namespace
 	ctx.metricsMode = config.metricsMode
+	ctx.suppressCRSAuditLogs = config.suppressCRSAuditLogs
 	ctx.initMetricsFromConfig(config)
 	if ctx.ruleSetCacheServerCluster != "" {
 		proxywasm.LogCriticalf("Fetching initial rules from ruleset cache server: %s, instance: %s", ctx.ruleSetCacheServerCluster, ctx.ruleSetCacheServerInstance)
@@ -184,7 +186,7 @@ func (ctx *corazaPlugin) OnPluginStart(pluginConfigurationSize int) types.OnPlug
 
 		// First we initialize our waf and our seclang parser
 		conf := coraza.NewWAFConfig().
-			WithErrorCallback(logError).
+			WithErrorCallback(errorCallbackForConfig(config)).
 			WithDebugLogger(debuglog.DefaultWithPrinterFactory(logPrinterFactory)).
 			// TODO(anuraaga): Make this configurable in plugin configuration.
 			// WithRequestBodyLimit(1024 * 1024 * 1024).
@@ -810,6 +812,20 @@ func (ctx *httpContext) handleInterruption(phase interruptionPhase, interruption
 	return types.ActionPause
 }
 
+func errorCallbackForConfig(config pluginConfiguration) func(ctypes.MatchedRule) {
+	if config.suppressCRSAuditLogs {
+		return func(ctypes.MatchedRule) {}
+	}
+	return logError
+}
+
+func errorCallbackForPlugin(ctx *corazaPlugin) func(ctypes.MatchedRule) {
+	if ctx.suppressCRSAuditLogs {
+		return func(ctypes.MatchedRule) {}
+	}
+	return logError
+}
+
 func logError(error ctypes.MatchedRule) {
 	msg := error.ErrorLog()
 	switch error.Rule().Severity() {
@@ -1135,7 +1151,7 @@ func (ctx *corazaPlugin) onRuleSetCacheServerResponse(numHeaders, bodySize, numT
 	proxywasm.LogInfof("Received ruleset configuration: UUID=%s, Timestamp=%s, Size=%d bytes", rulesResp.UUID, rulesResp.Timestamp, len(rulesResp.Rules))
 
 	conf := coraza.NewWAFConfig().
-		WithErrorCallback(logError).
+		WithErrorCallback(errorCallbackForPlugin(ctx)).
 		WithDebugLogger(debuglog.DefaultWithPrinterFactory(logPrinterFactory)).
 		WithRootFS(NewRuleDataFS(rulesResp.DataFiles))
 
