@@ -81,11 +81,11 @@ type corazaPlugin struct {
 	// Embed the default plugin context here,
 	// so that we don't need to reimplement all the methods.
 	types.DefaultPluginContext
-	perAuthorityWAFs wafMap
-	metricLabelsKV   []string
-	legacyMetrics    *wafMetrics
-	contractMetrics  *contractMetrics
-	metricsMode      metricsMode
+	perAuthorityWAFs     wafMap
+	metricLabelsKV       []string
+	legacyMetrics        *wafMetrics
+	contractMetrics      *contractMetrics
+	metricsMode          metricsMode
 	suppressCRSAuditLogs bool
 
 	// ruleSetCacheServerCluster is the Envoy cluster address of the RuleSet Cache Server

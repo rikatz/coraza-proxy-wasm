@@ -56,32 +56,32 @@ type fakeMatchedRule struct {
 	tags     []string
 }
 
-func (f fakeMatchedRule) Message() string                          { return "" }
-func (f fakeMatchedRule) Data() string                             { return "" }
-func (f fakeMatchedRule) URI() string                              { return "" }
-func (f fakeMatchedRule) TransactionID() string                    { return "" }
-func (f fakeMatchedRule) Disruptive() bool                         { return true }
-func (f fakeMatchedRule) ServerIPAddress() string                  { return "" }
-func (f fakeMatchedRule) ClientIPAddress() string                  { return "" }
-func (f fakeMatchedRule) MatchedDatas() []ctypes.MatchData         { return nil }
-func (f fakeMatchedRule) AuditLog() string                         { return "" }
-func (f fakeMatchedRule) ErrorLog() string                         { return "" }
-func (f fakeMatchedRule) Rule() ctypes.RuleMetadata                { return fakeRuleMetadata{f} }
+func (f fakeMatchedRule) Message() string                  { return "" }
+func (f fakeMatchedRule) Data() string                     { return "" }
+func (f fakeMatchedRule) URI() string                      { return "" }
+func (f fakeMatchedRule) TransactionID() string            { return "" }
+func (f fakeMatchedRule) Disruptive() bool                 { return true }
+func (f fakeMatchedRule) ServerIPAddress() string          { return "" }
+func (f fakeMatchedRule) ClientIPAddress() string          { return "" }
+func (f fakeMatchedRule) MatchedDatas() []ctypes.MatchData { return nil }
+func (f fakeMatchedRule) AuditLog() string                 { return "" }
+func (f fakeMatchedRule) ErrorLog() string                 { return "" }
+func (f fakeMatchedRule) Rule() ctypes.RuleMetadata        { return fakeRuleMetadata{f} }
 
 type fakeRuleMetadata struct {
 	fakeMatchedRule
 }
 
-func (f fakeRuleMetadata) ID() int                      { return 1 }
-func (f fakeRuleMetadata) File() string                   { return "" }
-func (f fakeRuleMetadata) Line() int                      { return 0 }
-func (f fakeRuleMetadata) Revision() string               { return "" }
-func (f fakeRuleMetadata) Severity() ctypes.RuleSeverity  { return f.severity }
-func (f fakeRuleMetadata) Version() string                { return "" }
-func (f fakeRuleMetadata) Tags() []string                 { return f.tags }
-func (f fakeRuleMetadata) Maturity() int                  { return 0 }
-func (f fakeRuleMetadata) Accuracy() int                  { return 0 }
-func (f fakeRuleMetadata) Operator() string               { return "" }
-func (f fakeRuleMetadata) Phase() ctypes.RulePhase        { return 0 }
-func (f fakeRuleMetadata) Raw() string                    { return "" }
-func (f fakeRuleMetadata) SecMark() string                { return "" }
+func (f fakeRuleMetadata) ID() int                       { return 1 }
+func (f fakeRuleMetadata) File() string                  { return "" }
+func (f fakeRuleMetadata) Line() int                     { return 0 }
+func (f fakeRuleMetadata) Revision() string              { return "" }
+func (f fakeRuleMetadata) Severity() ctypes.RuleSeverity { return f.severity }
+func (f fakeRuleMetadata) Version() string               { return "" }
+func (f fakeRuleMetadata) Tags() []string                { return f.tags }
+func (f fakeRuleMetadata) Maturity() int                 { return 0 }
+func (f fakeRuleMetadata) Accuracy() int                 { return 0 }
+func (f fakeRuleMetadata) Operator() string              { return "" }
+func (f fakeRuleMetadata) Phase() ctypes.RulePhase       { return 0 }
+func (f fakeRuleMetadata) Raw() string                   { return "" }
+func (f fakeRuleMetadata) SecMark() string               { return "" }

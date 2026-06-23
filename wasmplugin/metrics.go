@@ -34,7 +34,7 @@ type contractMetrics struct {
 
 	ruleHitsTopN *topNTracker
 
-	lastOverrideGauges     map[string]struct{}
+	lastOverrideGauges       map[string]struct{}
 	lastPluginRuleCountGauge string
 }
 
@@ -57,12 +57,12 @@ func newContractMetrics(cfg contractMetricsConfig, logWarn warnLogger) *contract
 	}
 
 	m := &contractMetrics{
-		driverType:           driverType,
-		counters:             make(map[string]proxywasm.MetricCounter),
-		histograms:           make(map[string]proxywasm.MetricHistogram),
-		gauges:               make(map[string]proxywasm.MetricGauge),
-		ruleHitsTopN:         newTopNTracker(topN),
-		lastOverrideGauges:   make(map[string]struct{}),
+		driverType:         driverType,
+		counters:           make(map[string]proxywasm.MetricCounter),
+		histograms:         make(map[string]proxywasm.MetricHistogram),
+		gauges:             make(map[string]proxywasm.MetricGauge),
+		ruleHitsTopN:       newTopNTracker(topN),
+		lastOverrideGauges: make(map[string]struct{}),
 	}
 
 	if strings.TrimSpace(cfg.Engine) == "" || strings.TrimSpace(cfg.Namespace) == "" {
