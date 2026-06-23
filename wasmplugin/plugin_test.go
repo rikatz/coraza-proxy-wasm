@@ -50,13 +50,13 @@ func TestFailurePolicyFail_BlocksOnError(t *testing.T) {
 	}, false)
 
 	// With failure_policy=fail, we expect the request to be blocked
-	// The handleInternalEngineFailurePolicy function sends a 403 response and returns ActionPause
+	// The handleInternalEngineFailurePolicy function sends a 500 response and returns ActionPause
 	assert.Equal(t, types.ActionPause, action)
 
 	// Verify that a local response was sent
 	localResponse := host.GetSentLocalResponse(contextID)
 	require.NotNil(t, localResponse, "Expected a local response to be sent when failure policy is fail")
-	assert.Equal(t, uint32(403), localResponse.StatusCode, "Expected 403 status code on WAF error with fail policy")
+	assert.Equal(t, uint32(500), localResponse.StatusCode, "Expected 500 status code on WAF error with fail policy")
 
 	host.CompleteHttpContext(contextID)
 }

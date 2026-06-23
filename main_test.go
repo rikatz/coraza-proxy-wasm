@@ -429,7 +429,7 @@ func TestLifecycle(t *testing.T) {
 			t.Run(tt.name, func(t *testing.T) {
 				conf := defaultPluginConfigForTests
 				if inlineRules := strings.TrimSpace(tt.inlineRules); inlineRules != "" {
-					conf = fmt.Sprintf(`{"directives_map": {"default": ["%s"]}, "default_directives": "default", "engine": "test-engine", "namespace": "test-ns"}`, inlineRules)
+					conf = fmt.Sprintf(`{"directives_map": {"default": ["%s"]}, "default_directives": "default", "metrics_mode": "contract", "engine": "test-engine", "namespace": "test-ns"}`, inlineRules)
 				}
 				opt := proxytest.
 					NewEmulatorOption().
