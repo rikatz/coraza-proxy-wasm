@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/corazawaf/coraza-proxy-wasm/wasmplugin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/corazawaf/coraza-proxy-wasm/wasmplugin"
 )
 
 func TestRuledataFS(t *testing.T) {
